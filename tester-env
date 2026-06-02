@@ -75,10 +75,11 @@ build_assets() {
     fi
     log "Building frontend assets (first run, may take 2-5 minutes)..."
     ensure_node_modules
-    # Run npm install + build with a timeout; the build exits on its own
+    # Use --entrypoint sh to override node service's entrypoint.node.sh
+    # which runs 'npm run watch' (never exits). We want a one-shot build.
     docker compose "${COMPOSE_FILES[@]}" \
         --project-name "${COMPOSE_PROJECT}" \
-        run --rm --user root node sh -c "npm install && npm run build" 2>&1
+        run --rm --entrypoint sh --user root node -c "npm install && npm run build" 2>&1
     log "Frontend assets built."
 }
 
