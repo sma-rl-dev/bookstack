@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "app": "bookstack",
+  "theme": "Small SaaS operations and product knowledge base",
+  "credentials": {
+    "admin": "admin@admin.com / password",
+    "editor": "ari.editor@example.test / password",
+    "viewer": "mina.viewer@example.test / password"
+  },
+  "fixed_time": "2026-02-15 09:30:00",
+  "stable_counts": {
+    "shelves": 2,
+    "books": 4,
+    "chapters": 6,
+    "pages": 12,
+    "seed_users_including_admin": 3
+  },
+  "requirements": {
+    "shelf-list": {
+      "status": "present",
+      "evidence": "Operations Hub and Product Knowledge Base shelves are created."
+    },
+    "book-list": {
+      "status": "present",
+      "evidence": "Support Playbooks, Product Launch Q2 2026, Engineering Runbooks, and Customer Research Archive books are created."
+    },
+    "search-target": {
+      "status": "present",
+      "evidence": "Priority Matrix page contains the unique phrase 'bluebird escalation'."
+    },
+    "roles-users": {
+      "status": "present",
+      "evidence": "Admin plus deterministic editor Ari Patel and viewer Mina Chen users exist."
+    },
+    "tags": {
+      "status": "present",
+      "evidence": "Seeded shelves, books, and pages include tags such as status=active, quarter=2026-Q2, and service=database."
+    }
+  }
+}

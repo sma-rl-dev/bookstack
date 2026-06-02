@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# BookStack - Tester Environment CLI
+# Usage: ./tester-env <command> [--run-id <id>] [--port <port>]
+# Commands: deploy, seed, verify, reset, stop, logs, status, help
+#
+# The CLI wraps the upstream docker-compose.yml with a deterministic
+# development environment. When the app is forked to apps/bookstack,
+# this file becomes the submodule-root CLI.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_ID="default"
+PORT="8080"
+
+# Compose files: base + tester-env overlay (overrides APP_URL for cross-container access)
+COMPOSE_BASE="${SCRIPT_DIR}/docker-compose.yml"
+COMPOSE_OVERLAY="${SCRIPT_DIR}/docker-compose.tester-env.yml"
+COMPOSE_FILES=(-f "${COMPOSE_BASE}" -f "${COMPOSE_OVERLAY}")
+
+# Docker bridge gateway: 172.17.0.1 is reachable from containers AND host.
+# APP_URL is set to this IP by the overlay compose file so login redirects,
+# form actions, and generated links work from the browser-checker container.
+DOCKER_GATEWAY="172.17.0.1"
+
+# Fixed deterministic APP_KEY (32 chars as required by upstream dev docs)
+APP_KEY="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
+
+# Credentials
+ADMIN_EMAIL="admin@admin.com"
+ADMIN_PASSWORD="password"
+
+refresh_names() {
+    local suffix=""
+    if [[ "${RUN_ID}" != "default" ]]; then
+        suffix="-${RUN_ID}"
+    fi
+    COMPOSE_PROJECT="tester-env-bookstack${suffix}"
+    # IMAGE_TAG is set by scripts/rl-env to a content-addressed tag so identical
+    # (baseline, patch-set) combos share an image. Manual invocations get :dev.
+    IMAGE_NAME="${IMAGE_TAG:-tester-env-bookstack:dev}"
+}
+
+log() { printf '==> %s\n' "$*"; }
+
+# Ensure .env exists with deterministic APP_KEY and APP_ENV=local
+ensure_env() {
+    if [[ ! -f "${SCRIPT_DIR}/.env" ]]; then
+        log "Creating .env from .env.example with deterministic APP_KEY..."
+        cp "${SCRIPT_DIR}/.env.example" "${SCRIPT_DIR}/.env"
+    fi
+    # Always ensure APP_KEY and APP_ENV are correct
+    sed -i 's/^APP_KEY=.*/APP_KEY='"${APP_KEY}"'/' "${SCRIPT_DIR}/.env"
+    if grep -q '^APP_ENV=' "${SCRIPT_DIR}/.env"; then
+        sed -i 's/^APP_ENV=.*/APP_ENV=local/' "${SCRIPT_DIR}/.env"
+    else
+        echo "APP_ENV=local" >> "${SCRIPT_DIR}/.env"
+    fi
+}
+
+# Ensure node_modules is writable by container (UID 1000 in node:22-alpine)
+ensure_node_modules() {
+    if [[ ! -d "${SCRIPT_DIR}/node_modules" ]]; then
+        mkdir -p "${SCRIPT_DIR}/node_modules"
+    fi
+    chmod 777 "${SCRIPT_DIR}/node_modules" 2>/dev/null || true
+}
+
+# Build frontend assets (runs npm install + npm run build inside container as root)
+# Skip if dist/styles.css already exists (assets are already built)
+build_assets() {
+    if [[ -f "${SCRIPT_DIR}/public/dist/styles.css" ]]; then
+        log "Frontend assets already built, skipping."
+        return 0
+    fi
+    log "Building frontend assets (first run, may take 2-5 minutes)..."
+    ensure_node_modules
+    # Run npm install + build with a timeout; the build exits on its own
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        run --rm --user root node sh -c "npm install && npm run build" 2>&1
+    log "Frontend assets built."
+}
+
+wait_http() {
+    local url="$1"
+    local max_wait="${2:-120}"
+    local waited=0
+    log "Waiting for ${url} to respond..."
+    while [[ $waited -lt $max_wait ]]; do
+        if curl -s -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null | grep -qE '^(200|302)$'; then
+            log "Application is ready at ${url}"
+            return 0
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    log "WARNING: Application did not respond within ${max_wait}s"
+    return 1
+}
+
+# ──────────────────────────────────────────────
+# Commands
+# ──────────────────────────────────────────────
+
+cmd_deploy() {
+    refresh_names
+    log "Deploying BookStack (project: ${COMPOSE_PROJECT}, port: ${PORT})..."
+
+    ensure_env
+
+    log "Building Docker images and starting services..."
+    DEV_PORT="${PORT}" docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        up --build -d db app mailhog
+
+    # Wait for the database + app to be ready
+    sleep 10
+
+    # Build assets (node service fails on permission; build manually as root)
+    build_assets
+
+    wait_http "http://localhost:${PORT}" 90
+
+    log "Deployment complete."
+    echo ""
+    echo "  Host URL:          http://localhost:${PORT}"
+    echo "  Browser MCP URL:   http://${DOCKER_GATEWAY}:${PORT}"
+    echo "  Email:             ${ADMIN_EMAIL}"
+    echo "  Password:          ${ADMIN_PASSWORD}"
+    echo "  Project:           ${COMPOSE_PROJECT}"
+    echo ""
+    echo "  Commands:"
+    echo "    ./tester-env status"
+    echo "    ./tester-env logs"
+    echo "    ./tester-env stop"
+    echo "    ./tester-env reset"
+}
+
+cmd_seed() {
+    refresh_names
+    log "Resetting database and seeding deterministic BookStack knowledge base..."
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        exec -T app php artisan migrate:fresh --force
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        exec -T app php artisan db:seed --class=TesterEnvSeeder --force
+    log "Seed complete: Operations Hub/Product Knowledge Base shelves, 4 books, 6 chapters, 12 pages, 3 users."
+}
+
+cmd_verify() {
+    refresh_names
+    log "Verifying deterministic seeded data via BookStack models..."
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        exec -T app php artisan tinker --execute='include "/app/tester-env-verify.php";'
+}
+
+cmd_reset() {
+    refresh_names
+    log "Resetting BookStack (project: ${COMPOSE_PROJECT})..."
+
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        down -v 2>/dev/null || true
+
+    log "Reset complete. Run 'deploy' to start fresh."
+}
+
+cmd_stop() {
+    refresh_names
+    log "Stopping BookStack (project: ${COMPOSE_PROJECT})..."
+
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        stop 2>/dev/null || true
+
+    log "Stopped."
+}
+
+cmd_logs() {
+    refresh_names
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        logs -f 2>/dev/null || log "No containers running for project ${COMPOSE_PROJECT}"
+}
+
+cmd_status() {
+    refresh_names
+    local running
+    running=$(docker ps --filter "name=${COMPOSE_PROJECT}" --format "{{.Names}}" 2>/dev/null || true)
+    if [[ -n "${running}" ]]; then
+        echo "Status: RUNNING"
+        echo "Host URL: http://localhost:${PORT}"
+        echo "Browser MCP URL: http://${DOCKER_GATEWAY}:${PORT}"
+        echo "Project: ${COMPOSE_PROJECT}"
+        echo "Containers:"
+        docker ps --filter "name=${COMPOSE_PROJECT}" --format "  {{.Names}} {{.Status}}"
+    else
+        echo "Status: NOT RUNNING"
+        echo "Project: ${COMPOSE_PROJECT}"
+    fi
+    echo ""
+    echo "Credentials: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}"
+}
+
+cmd_help() {
+    cat <<EOF
+BookStack - Tester Environment CLI
+
+Usage: ./tester-env <command> [--run-id <id>] [--port <port>]
+
+Commands:
+  deploy    Build images, start services, wait for ready
+  seed      Reset database and populate deterministic seed data
+  verify    Assert seeded state via BookStack models
+  reset     Stop containers and remove volumes (clean slate)
+  stop      Stop containers (preserves database)
+  logs      Tail container logs
+  status    Show whether the app is running
+  help      Show this help message
+
+Options:
+  --run-id <id>   Isolate compose project for parallel runs (default: default)
+  --port <port>   Host port to bind (default: 8080)
+
+Credentials: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}
+
+Typical workflow:
+  ./tester-env deploy              # Build and start
+  ./tester-env seed                # Populate deterministic data
+  ./tester-env verify              # Check seeded state
+  ./tester-env status              # Check it is running
+  ./tester-env reset               # Clean slate
+EOF
+}
+
+# ──────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────
+
+main() {
+    local cmd="${1:-help}"
+
+    # Parse optional arguments
+    shift 2>/dev/null || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --run-id)
+                RUN_ID="$2"; shift 2 ;;
+            --port)
+                PORT="$2"; shift 2 ;;
+            --help|-h)
+                cmd_help; exit 0 ;;
+            *)
+                echo "Unknown option: $1"
+                cmd_help; exit 1 ;;
+        esac
+    done
+
+    case "${cmd}" in
+        deploy)    cmd_deploy ;;
+        seed)      cmd_seed ;;
+        verify)    cmd_verify ;;
+        reset)     cmd_reset ;;
+        stop)      cmd_stop ;;
+        logs)      cmd_logs ;;
+        status)    cmd_status ;;
+        help|--help|-h) cmd_help ;;
+        *)
+            echo "Unknown command: ${cmd}"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

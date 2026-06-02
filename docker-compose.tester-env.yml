@@ -1,0 +1,14 @@
+# tester-env overlay: overrides APP_URL so generated links and redirects
+# are reachable from the browser-checker container, not just from the host.
+#
+# 172.17.0.1 = default Docker bridge gateway IP, reachable from:
+#   - Any Docker container on the default bridge network
+#   - The host (routed via docker0 interface)
+#
+# Plain "localhost" does not work from the browser MCP container because
+# localhost inside a container refers to the container itself.
+
+services:
+  app:
+    environment:
+      APP_URL: "http://172.17.0.1:${DEV_PORT:-8080}"
