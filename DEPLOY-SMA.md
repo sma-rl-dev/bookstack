@@ -17,6 +17,8 @@
 - Ensures `.env` exists with deterministic `APP_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab` and `APP_ENV=local`
 - Builds `app` + `db` + `mailhog` services via `docker compose` using `docker-compose.yml` (upstream) + `docker-compose.tester-env.yml` overlay
 - Overlay sets `APP_URL=http://172.17.0.1:${DEV_PORT:-8080}` (Docker bridge gateway) so cross-container browser access works
+- Overlay pins `app.image: ${IMAGE_TAG:-tester-env-bookstack:dev}` (content-addressed per baseline+patch-set via `scripts/rl-env`; manual runs default to `:dev`)
+- Overlay pins the compose network to `${BOOKSTACK_SUBNET:-10.180.180.0/24}` (explicit `/24`; Docker auto-IPAM spills into protected `192.168.0.0/16`, so auto-allocation is not used)
 - Builds frontend assets (`npm install && npm run build`) as root in a one-shot node container
 - Waits for HTTP 200/302 response on http://localhost:$PORT
 - Host URL: `http://localhost:$PORT`

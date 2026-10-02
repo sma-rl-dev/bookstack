@@ -10,5 +10,21 @@
 
 services:
   app:
+    # Content-addressed image tag exported by scripts/rl-env as IMAGE_TAG
+    # (shared per baseline+patch-set); manual runs default to :dev.
+    # RUN_ID only scopes containers/volumes via the compose project name.
+    image: ${IMAGE_TAG:-tester-env-bookstack:dev}
     environment:
       APP_URL: "http://172.17.0.1:${DEV_PORT:-8080}"
+
+# Explicit /24: Docker default-pool auto-allocation on this host spills into
+# 192.168.0.0/16 (site LAN, protected), so Docker auto-IPAM is not used.
+# Default 10.180.180.0/24 is verified free (10.180.182 claimed by alerta,
+# 10.180.183 + 10.180.184-252 reserved for Beszel); override per run with
+# BOOKSTACK_SUBNET when needed. Serial runs (supports_parallel_runs=false)
+# use this one scoped subnet; reset tears it down.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${BOOKSTACK_SUBNET:-10.180.180.0/24}
