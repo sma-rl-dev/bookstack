@@ -52,6 +52,7 @@
 ```
 
 - `docker compose down -v` — removes containers AND database volume
+- Restores host worktree ownership (`alpine chown -R <host-uid:gid>`, exact `SCRIPT_DIR` bind, `--network none`) so root-owned container build trees never block central `git worktree remove`
 - Full idempotency: `reset && deploy && seed && verify` produces identical state every time
 
 ## Stop

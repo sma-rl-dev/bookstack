@@ -158,6 +158,20 @@ cmd_verify() {
         exec -T app php artisan tinker --execute='include "/app/tester-env-verify.php";'
 }
 
+# Restore host ownership of the worktree bind-mount.
+# Container builds (npm/composer as root) leave generated trees such as
+# node_modules/public/dist root-owned, which otherwise breaks central
+# `git worktree remove` during `scripts/rl-env stop`. Scoped to exactly this
+# app worktree (SCRIPT_DIR bind only); --network none avoids Docker LAN use.
+restore_worktree_ownership() {
+    local uid_gid
+    uid_gid="$(stat -c %u:%g "${SCRIPT_DIR}")"
+    log "Restoring worktree ownership to ${uid_gid}..."
+    docker run --rm --network none --user root \
+        --volume "${SCRIPT_DIR}:/work" \
+        alpine chown -R "${uid_gid}" /work 2>&1
+}
+
 cmd_reset() {
     refresh_names
     log "Resetting BookStack (project: ${COMPOSE_PROJECT})..."
@@ -165,6 +179,8 @@ cmd_reset() {
     docker compose "${COMPOSE_FILES[@]}" \
         --project-name "${COMPOSE_PROJECT}" \
         down -v 2>/dev/null || true
+
+    restore_worktree_ownership
 
     log "Reset complete. Run 'deploy' to start fresh."
 }
