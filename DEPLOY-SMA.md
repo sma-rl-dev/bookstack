@@ -56,7 +56,13 @@
 - Adds ONLY: `Escalation Contacts` second chapter of `Support Playbooks` (priority 2) with one ordinary page `Escalation Roster` (Ari Patel primary on-call, Mina Chen secondary; no `bluebird` text, no fixture provenance)
 - Rebuilds joint permissions and the search index, same as the base seeder; create-if-missing so repeats are stable
 - `verify-chapter-export` reuses `tester-env-verify.php` via include, then asserts the strict control: 2 chapters in Support Playbooks, roster chapter/book scope, slugs/URLs/route lookups, Triage still 2 pages, Glossary still standalone, `bluebird escalation` search target still exactly 1 page
-- Intended runner use for `bookstack-chapter-markdown-export-scope-001` only: `seed_command='./tester-env seed-chapter-export'` with `copy_paths` for `database/seeders/TesterEnvChapterExportSeeder.php` and `tester-env-verify-chapter-export.php`; base `seed`/`verify` behavior is unchanged
+- These explicit commands support manual runs. For centralized chapter setup, select the adapter described below.
+
+## Chapter-export CLI adapter (scoped)
+
+- The central runner calls the selected `app_cli` with standard `reset`, `deploy`, and `seed` commands; it does not execute legacy `deploy.seed_command` metadata.
+- For `bookstack-chapter-markdown-export-scope-001`, set `deploy.app_cli` to `tester-env-chapter-export`. Its standard `seed` and `verify` commands invoke the scoped chapter commands. All other commands and their arguments, environment and exit status pass through to `tester-env`.
+- Set chapter `deploy.copy_paths` to `["tester-env", "database/seeders/TesterEnvChapterExportSeeder.php", "tester-env-verify-chapter-export.php"]`; the runner archives the selected CLI and declared companions from the immutable tooling ref.
 
 ## Reset
 

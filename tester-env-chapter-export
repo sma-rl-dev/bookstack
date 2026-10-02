@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# BookStack - chapter-export scoped CLI adapter.
+# The central runner always invokes `<app_cli> reset/deploy/seed`, so the
+# chapter package selects this adapter as its app_cli: standard `seed` and
+# `verify` map to the scoped chapter-export subcommands, and every other
+# command forwards unchanged to the main tester-env CLI.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+command="${1:-help}"
+shift 2>/dev/null || true
+case "${command}" in
+    seed)   command="seed-chapter-export" ;;
+    verify) command="verify-chapter-export" ;;
+esac
+
+exec "${SCRIPT_DIR}/tester-env" "${command}" "$@"
