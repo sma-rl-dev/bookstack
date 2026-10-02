@@ -3,7 +3,7 @@ set -euo pipefail
 
 # BookStack - Tester Environment CLI
 # Usage: ./tester-env <command> [--run-id <id>] [--port <port>]
-# Commands: deploy, seed, verify, reset, stop, logs, status, help
+# Commands: deploy, seed, verify, seed-chapter-export, verify-chapter-export, reset, stop, logs, status, help
 #
 # The CLI wraps the upstream docker-compose.yml with a deterministic
 # development environment. When the app is forked to apps/bookstack,
@@ -158,6 +158,24 @@ cmd_verify() {
         exec -T app php artisan tinker --execute='include "/app/tester-env-verify.php";'
 }
 
+cmd_seed_chapter_export() {
+    cmd_seed
+    refresh_names
+    log "Seeding chapter-export control data (Escalation Contacts chapter + Escalation Roster page)..."
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        exec -T app php artisan db:seed --class=TesterEnvChapterExportSeeder --force
+    log "Chapter-export seed complete: Support Playbooks now has Triage Workflows and Escalation Contacts chapters."
+}
+
+cmd_verify_chapter_export() {
+    refresh_names
+    log "Verifying chapter-export control data via BookStack models..."
+    docker compose "${COMPOSE_FILES[@]}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        exec -T app php artisan tinker --execute='include "/app/tester-env-verify-chapter-export.php";'
+}
+
 # Restore host ownership of the worktree bind-mount.
 # Container builds (npm/composer as root) leave generated trees such as
 # node_modules/public/dist root-owned, which otherwise breaks central
@@ -232,6 +250,8 @@ Commands:
   deploy    Build images, start services, wait for ready
   seed      Reset database and populate deterministic seed data
   verify    Assert seeded state via BookStack models
+  seed-chapter-export    Seed base data plus the Escalation Contacts chapter-export control
+  verify-chapter-export  Assert base state plus the Escalation Contacts chapter-export control
   reset     Stop containers and remove volumes (clean slate)
   stop      Stop containers (preserves database)
   logs      Tail container logs
@@ -280,6 +300,8 @@ main() {
         deploy)    cmd_deploy ;;
         seed)      cmd_seed ;;
         verify)    cmd_verify ;;
+        seed-chapter-export)      cmd_seed_chapter_export ;;
+        verify-chapter-export)    cmd_verify_chapter_export ;;
         reset)     cmd_reset ;;
         stop)      cmd_stop ;;
         logs)      cmd_logs ;;
